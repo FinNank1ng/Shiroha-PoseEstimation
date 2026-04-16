@@ -5,6 +5,8 @@ import numpy as np
 import json
 import logging
 import fractions
+import socket
+
 from aiohttp import web
 from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
 from av import VideoFrame
@@ -207,9 +209,58 @@ async def offer(request):
 
     return web.json_response({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type})
 
+async def options_handler(request):
+    return web.Response(status=200)
+
+def get_preferred_ip():
+
+    """
+    获取本机首选 IP 地址（即连接互联网时使用的网卡 IP）
+    原理：尝试连接一个公网地址，会自动选择路由，获取这个路由的源 IP
+    """
+    try:
+        # 创建一个 UDP 套接字
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # 尝试连接但只确定 Google DNS
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        # 如果完全没网，回退到本地回环
+        return "127.0.0.1"
+
+
+# CORS 中间件，允许跨域
+@web.middleware
+async def cors_middleware(request, handler):
+    # 如果是 OPTIONS 预检请求，直接返回成功
+    if request.method == "OPTIONS":
+        return web.Response(status=200, headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type"
+        })
+
+    # 处理正常请求
+    response = await handler(request)
+    # 在响应头里加上允许跨域的标记
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
 
 if __name__ == "__main__":
-    app = web.Application()
+    app = web.Application(middlewares=[cors_middleware])
     app.router.add_post("/offer", offer)
-    logger.info("GO GO GO!  WebRTC Server 矩阵中心已启动 @ 8888")
-    web.run_app(app, port=8888)
+    app.router.add_options("/offer", options_handler)
+    # 智能 IP 选择逻辑
+    server_cfg = config.get("server", {})
+    final_host = server_cfg.get("bind_host")
+    if not final_host:
+        # 如果配置是 null 或不存在，则自动探测
+        final_host = get_preferred_ip()
+        logger.info(f"🌍 未指定 bind_host，已自动探测当前网络 IP: {final_host}")
+    else:
+        logger.info(f"🔒 已根据配置强制绑定 IP: {final_host}")
+
+    logger.info(f"GO GO GO!  WebRTC Server 矩阵中心已启动 @ {final_host}:{server_cfg.get('port', 8888)}")
+    web.run_app(app, host=final_host, port=server_cfg.get('port', 8888))

@@ -45,5 +45,13 @@
   },
   "fall_detector": {
     "ground_threshold_sec": 4.5
+  },
+
+  "server": {
+    "//": "服务器指定IP，若不指定将按默认UDP以本地连接",
+    "host": "0.0.0.0",
+    "port": 8765,
+    "mjpeg_port": 8766,
+    "bind_host": null
   }
 }
